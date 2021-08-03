@@ -1,0 +1,191 @@
+---
+title: "Bombus insularis population genetic analysis - Blacksmith Fork Canyon"
+author: "Jonathan Koch"
+date: "12/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Summary
+
+**The study.**
+The goal of this study is to determine the genetic diversity of Bombus insularis in in the Blacksmith Fork Canyon Field Sites. In this study we estimated genetic diversity, structure, and sibship assignment
+
+```{r warning=F, message=F}
+
+# setwd
+setwd("/Users/jonathankoch/Google Drive/Psythirus-PopulationGenetics")
+
+library("poppr")
+df <- read.csv("GMB-11-25-20-p1-Bombus_insularis_PlexAB_combined_sibsremoved.csv", skip = 2)
+names(df)
+# sprintf("%03d", df$Oli119...1)
+monpop <- read.genalex("GMB-11-25-20-p1-Bombus_insularis_PlexAB_combined_sibsremoved_4lociremoved.csv")
+
+
+```
+### The genotype accumulation curve ###
+
+A genotype accumulation curve is a tool that allows you to assess how much power you have to discriminate between unique individuals given a random sample of n loci. We specified sample = 1000 in our function call. This means that for each boxplot, n loci were randomly sampled 1000 times in order to create the distribution. Since this data has been curated, we can see that we have reached the plateau with 4 loci. 
+
+```{r echo=F, warning=F, message=F}
+
+gac <- genotype_curve(monpop, sample = 1000, quiet = TRUE)
+
+```
+
+### Allele frequencies, missing data, and ploidy ###
+
+A good first step after loading data is to look for missing data, rare alleles and overall quality of your data:
+
+```{r echo=F, warning=F, message=F}
+
+(pinflt <- locus_table(monpop))
+info_table(monpop, type = "missing", plot = TRUE)
+```
+
+We see that we have anywhere from 5 to 22 microsatellite alleles per locus. Locus Oli014 - 1 has the highest Simpson diversity (0.93) and Oli014 - 1 has the most evenly distirbuted alleles (0.88).
+
+### Removing loci and genotypes ##
+
+When removing loci or genotypes, you can specify a cutoff representing the percent missing to be removed. The default is 0.05 (5%).
+
+```{r echo=F, warning=F, message=F}
+library("magrittr")
+monpop %>% missingno("geno", cutoff = 0.20) %>% info_table(plot = TRUE)
+# monpop %>% missingno("loci", cutoff = 0.50) %>% info_table(plot = TRUE, scale = TRUE)
+
+```
+```{r}
+library("pegas")
+(nanhwe.full <- hw.test(monpop, B = 1000)) # performs 1000 permuatations
+```
+```{r}
+nanhwe.pop <- seppop(monpop) %>% lapply(hw.test, B = 0)
+NHBO <- as.data.frame(nanhwe.pop$NHB0)
+as.data.frame(p.adjust(NHBO$`Pr(chi^2 >)`, method = "bonferroni"))
+```
+
+```{r}
+library(poppr)
+ia(monpop, sample = 999)
+monpop %>% pair.ia
+```
+
+### Population structure: GST, genetic distance, and clustering ###
+
+Now we will use Hendrick’s standardized GST to assess population structure among these populations (Hedrick, 2005).
+
+```{r}
+library("mmod")
+Gst_Hedrick(monpop)
+
+```
+*Genetic Distance*
+
+```{r echo=F, message=F, warning=F}
+library("poppr")
+library("ape") # To visualize the tree using the "nj" function
+library("magrittr")
+
+set.seed(10)
+ten_samples <- sample(nInd(monpop), 10)
+mic10       <- monpop[ten_samples]
+(micdist    <- provesti.dist(mic10))
+```
+
+*The above represents the pairwise distances between these 10 samples. We will use this distance matrix to create a neighbor-joining tree.*
+
+
+```{r}
+# DAPC requires the adegenet package. Let's load this package:
+library("adegenet")
+pop(monpop) <- monpop$pop
+dapc.monpop <- dapc(monpop)
+scatter(dapc.monpop)
+```
+```{r}
+library(graph4lg)
+
+genind_to_genepop(monpop, output = "test.txt")
+```
+
+### AMOVA
+```{r}
+
+table(strata(monpop))
+
+Aeutamova <- poppr.amova(monpop, ~Pop)
+set.seed(1999)
+Aeutamova
+Aeutsignif   <- randtest(Aeutamova, nrepet = 999)
+Aeutsignif 
+plot(Aeutsignif)
+```
+```{r}
+# strata G
+# make sure you have Rtools installed
+# install from GitHub
+# devtools::install_github('ericarcher/strataG', build_vignettes = TRUE)
+
+library(strataG)
+library(adegenet)
+
+# setwd
+setwd("/Users/jonathankoch/Google Drive/Psythirus-PopulationGenetics")
+
+# read loci
+df <- read.csv("GMB-11-25-20-p1-Bombus_insularis_PlexAB_combined_sibsremoved_adegenet.csv", header = TRUE)
+df.2 <- df2gtypes(df, ploidy = 2, id.col = 1, strata.col = 2, loc.col = 3)
+
+# test for Hardy-Weinberg Equilibrium
+hwe_df.2 <- hweTest(df.2)
+hwe_df.2 <- as.data.frame(hwe_df.2)
+hwe_df.2$p.value.adjust <- p.adjust(hwe_df.2$hwe_df.2, method = "bonferroni")
+write.csv(hwe_df.2, "Results/results_hwe_insularis.csv", row.names = TRUE)
+
+# test for Linkage Disequilibirum
+LD_df.2 <- LDgenepop(df.2)
+LD_df.2
+LD_df.2.adjust <- p.adjust(LD_df.2$p.value)
+LD_df.2$p.value.adjust <- LD_df.2.adjust
+(sort(LD_df.2$p.value.adjust))
+write.csv(LD_df.2, "Results/results_LD_insularis.csv", row.names = TRUE)
+
+```
+
+```{r}
+# read loci - this is the final data analysis
+df <- read.csv("GMB-11-25-20-p1-Bombus_insularis_PlexAB_combined_sibsremoved_adegenet_removedloci.csv", header = TRUE)
+df.3 <- df2gtypes(df, ploidy = 2, id.col = 1, strata.col = 2, loc.col = 3)
+
+# genetic diversity
+# expected heterozygosity
+heho <- strataG::heterozygosity(df.3, by.strata = TRUE,
+                                type = c("expected", "observed"))
+wilcox.test(heho$exptd.het~heho$stratum, exact = FALSE)
+
+# allelic richness
+all.rich <- strataG::allelicRichness(df.3, by.strata = TRUE)
+wilcox.test(all.rich$allelic.richness~all.rich$stratum, exact = FALSE)
+
+# proportion of unique alleles
+all.pri <- as.data.frame(strataG::privateAlleles(df.3))
+wilcox.test(all.pri$HB0, all.pri$NHB0, exact = FALSE)
+all.pri.rbind <- c(all.pri$HB0, all.pri$NHB0)
+
+# one big table of values
+gd.table <- cbind(heho, all.rich$allelic.richness, all.pri.rbind)
+write.csv(gd.table, "Results/insularis_genetic_diversity_metrics.csv")
+```
+```{r}
+pairwiseTest(df.3)
+overallTest(df.3)
+popStructTest(df.3)
+```
+
+
